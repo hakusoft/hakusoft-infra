@@ -1,0 +1,19 @@
+# Terraform state — contains resource IDs, IPs, and sometimes secrets. Never commit.
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# .terraform.lock.hcl IS committed intentionally — it pins provider versions
+# for reproducibility, same idea as package-lock.json.
+
+# Variable files that may contain real account-specific values.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Crash logs
+crash.log
+crash.*.log
+
+# OS files
+.DS_Store
