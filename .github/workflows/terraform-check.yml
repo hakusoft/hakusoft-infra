@@ -1,0 +1,25 @@
+name: terraform-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  fmt-validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - run: terraform fmt -check -recursive
+
+      - run: terraform init -backend=false
+
+      - run: terraform validate
