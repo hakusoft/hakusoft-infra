@@ -226,10 +226,11 @@ resource "aws_lambda_permission" "fetch_minutely" {
   source_arn    = aws_cloudwatch_event_rule.fetch_minutely.arn
 }
 
-# 朝 9:00 JST = 0:00 UTC
+# 日付が変わったら当日の器を作る。0:00 ちょうどは取得元側の日次切替と
+# 重なりうるため 0:15 JST = 前日 15:15 UTC にずらす
 resource "aws_cloudwatch_event_rule" "morning_daily" {
   name                = "${local.name}-morning-daily"
-  schedule_expression = "cron(0 0 * * ? *)"
+  schedule_expression = "cron(15 15 * * ? *)"
   state               = "DISABLED"
 }
 
