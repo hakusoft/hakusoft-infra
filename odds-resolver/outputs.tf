@@ -22,3 +22,8 @@ output "github_deploy_role_arn" {
   description = "GitHub Actions の role-to-assume に設定する ARN"
   value       = aws_iam_role.github_deploy.arn
 }
+
+output "github_deploy_ingest_role_arn" {
+  description = "ingest デプロイ CI の role-to-assume に設定する ARN"
+  value       = aws_iam_role.github_deploy_ingest.arn
+}

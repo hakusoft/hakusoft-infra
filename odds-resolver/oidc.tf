@@ -86,3 +86,38 @@ resource "aws_iam_role_policy" "github_deploy" {
   role   = aws_iam_role.github_deploy.id
   policy = data.aws_iam_policy_document.github_deploy.json
 }
+
+# ---- ingest デプロイ用ロール（odds-resolver#29） -----------------------
+#
+# ingest/ の Lambda コード更新だけを許す。frontend 用の github_deploy とは
+# 分ける。混ぜると S3 同期の CI が Lambda を、Lambda 更新の CI が S3 を
+# 触れるようになり、どちらかの workflow が侵害されたときの被害が広がる。
+
+resource "aws_iam_role" "github_deploy_ingest" {
+  name = "${local.name}-github-deploy-ingest"
+  # IAM の description は ASCII のみ（日本語を入れると ValidationError）
+  description        = "Lets GitHub Actions update ingest Lambda function code"
+  assume_role_policy = data.aws_iam_policy_document.github_assume_role.json
+}
+
+# UpdateFunctionCode のみ。設定変更（handler・環境変数・ロール差し替え）は
+# Terraform の領分なので UpdateFunctionConfiguration は与えない。
+# read-api も ingest/ パッケージを積むため対象に含める（#29 起票時は 3 関数
+# だったが、後から #31 で read-api が増えた）。
+data "aws_iam_policy_document" "github_deploy_ingest" {
+  statement {
+    actions = ["lambda:UpdateFunctionCode"]
+    resources = [
+      aws_lambda_function.fetch.arn,
+      aws_lambda_function.morning.arn,
+      aws_lambda_function.archive.arn,
+      aws_lambda_function.read_api.arn,
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "github_deploy_ingest" {
+  name   = "deploy-ingest"
+  role   = aws_iam_role.github_deploy_ingest.id
+  policy = data.aws_iam_policy_document.github_deploy_ingest.json
+}
