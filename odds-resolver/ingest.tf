@@ -247,10 +247,12 @@ resource "aws_lambda_permission" "morning_daily" {
   source_arn    = aws_cloudwatch_event_rule.morning_daily.arn
 }
 
-# 深夜 2:00 JST = 17:00 UTC（前日分の確定を待ってから焼く）
+# その日のうちに焼く（23:30 JST = 14:30 UTC）。日付が変わると当日/過去の
+# 分岐が切り替わり S3 を見に行くため、跨ぐ前にアーカイブを済ませておく。
+# 順序: 23:30 焼く → 0:15 翌日の器を作る
 resource "aws_cloudwatch_event_rule" "archive_nightly" {
   name                = "${local.name}-archive-nightly"
-  schedule_expression = "cron(0 17 * * ? *)"
+  schedule_expression = "cron(30 14 * * ? *)"
   state               = "DISABLED"
 }
 
