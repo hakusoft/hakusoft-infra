@@ -268,3 +268,86 @@ resource "aws_lambda_permission" "archive_nightly" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.archive_nightly.arn
 }
+
+# ---- 当日読み取り API（Issue: odds-resolver#19） ----------------------
+# DynamoDB のホットデータを JSON で返す。Lambda Function URL で公開し、
+# API Gateway を挟まない（最小構成）。読むだけなので権限は Query のみ。
+
+resource "aws_iam_role" "read_api_lambda" {
+  name = "${local.name}-read-api-lambda"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "read_api_lambda" {
+  name = "read"
+  role = aws_iam_role.read_api_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "DynamoRead"
+        Effect   = "Allow"
+        Action   = ["dynamodb:Query"]
+        Resource = aws_dynamodb_table.hot.arn
+      },
+      {
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
+
+resource "aws_lambda_function" "read_api" {
+  function_name = "${local.name}-read-api"
+  role          = aws_iam_role.read_api_lambda.arn
+  runtime       = "python3.13"
+  handler       = "ingest.api.handler"
+  timeout       = 10
+  memory_size   = 128
+
+  filename         = data.archive_file.placeholder.output_path
+  source_code_hash = data.archive_file.placeholder.output_base64sha256
+
+  environment {
+    variables = {
+      TABLE_NAME = aws_dynamodb_table.hot.name
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
+}
+
+# Function URL は CloudFront 経由でのみ叩く。直叩きを塞ぐため AWS_IAM とし、
+# CloudFront の OAC（SigV4 署名）で呼ばせる。URL 単体の public 公開はしない。
+resource "aws_lambda_function_url" "read_api" {
+  function_name      = aws_lambda_function.read_api.function_name
+  authorization_type = "AWS_IAM"
+}
+
+# CloudFront(OAC) が read-api Function URL を呼ぶことを許可する
+resource "aws_lambda_permission" "read_api_cf" {
+  statement_id           = "AllowCloudFront"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.read_api.function_name
+  principal              = "cloudfront.amazonaws.com"
+  source_arn             = aws_cloudfront_distribution.frontend.arn
+  function_url_auth_type = "AWS_IAM"
+}
+
+output "read_api_url" {
+  value = aws_lambda_function_url.read_api.function_url
+}

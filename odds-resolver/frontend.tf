@@ -27,6 +27,15 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+# 当日読み取り API（Lambda Function URL）を CloudFront から SigV4 署名で呼ぶ。
+# これで Function URL を直叩き public にせず、同一ドメインの /api/* で読める。
+resource "aws_cloudfront_origin_access_control" "read_api" {
+  name                              = "${local.name}-read-api"
+  origin_access_control_origin_type = "lambda"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
   default_root_object = "index.html"
@@ -42,6 +51,20 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
+  # 当日 API。Function URL のホスト名だけを domain_name に渡す（https:// と / を除く）
+  origin {
+    domain_name              = replace(replace(aws_lambda_function_url.read_api.function_url, "https://", ""), "/", "")
+    origin_id                = "lambda-read-api"
+    origin_access_control_id = aws_cloudfront_origin_access_control.read_api.id
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
   default_cache_behavior {
     target_origin_id       = "s3-frontend"
     viewer_protocol_policy = "redirect-to-https"
@@ -50,6 +73,21 @@ resource "aws_cloudfront_distribution" "frontend" {
 
     # AWS 管理の CachingOptimized ポリシー。ID は全アカウント共通の固定値。
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+
+  # /api/* は当日 API（Lambda）へ。クエリ文字列(?date/?id)をオリジンへ渡し、
+  # 短時間だけキャッシュする（当日オッズは動くため）。
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
+    target_origin_id       = "lambda-read-api"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+
+    # AWS 管理 CachingOptimizedForUncompressedObjects ではなく、クエリを
+    # キャッシュキーに含める必要があるため専用ポリシーを別リソースで定義
+    cache_policy_id          = aws_cloudfront_cache_policy.api.id
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AWS 管理 AllViewerExceptHostHeader
   }
 
   # オッズデータ（/data/*）はキャッシュ時間を短くする。
@@ -105,4 +143,25 @@ data "aws_iam_policy_document" "frontend_bucket" {
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id
   policy = data.aws_iam_policy_document.frontend_bucket.json
+}
+
+# 当日 API 用キャッシュポリシー。クエリ文字列(?date/?id)をキャッシュキーに
+# 含め、60 秒だけ持つ（当日オッズは動くため長く持たせない）。
+resource "aws_cloudfront_cache_policy" "api" {
+  name        = "${local.name}-api"
+  default_ttl = 60
+  min_ttl     = 0
+  max_ttl     = 60
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "all"
+    }
+  }
 }
