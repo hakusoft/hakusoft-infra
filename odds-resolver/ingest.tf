@@ -268,3 +268,105 @@ resource "aws_lambda_permission" "archive_nightly" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.archive_nightly.arn
 }
+
+# ---- 当日読み取り API（Issue: odds-resolver#19） ----------------------
+# DynamoDB のホットデータを JSON で返す。Lambda Function URL で公開し、
+# API Gateway を挟まない（最小構成）。読むだけなので権限は Query のみ。
+
+resource "aws_iam_role" "read_api_lambda" {
+  name = "${local.name}-read-api-lambda"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "read_api_lambda" {
+  name = "read"
+  role = aws_iam_role.read_api_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "DynamoRead"
+        Effect   = "Allow"
+        Action   = ["dynamodb:Query"]
+        Resource = aws_dynamodb_table.hot.arn
+      },
+      {
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
+
+resource "aws_lambda_function" "read_api" {
+  function_name = "${local.name}-read-api"
+  role          = aws_iam_role.read_api_lambda.arn
+  runtime       = "python3.13"
+  handler       = "ingest.api.handler"
+  timeout       = 10
+  memory_size   = 128
+
+  filename         = data.archive_file.placeholder.output_path
+  source_code_hash = data.archive_file.placeholder.output_base64sha256
+
+  environment {
+    variables = {
+      TABLE_NAME = aws_dynamodb_table.hot.name
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
+}
+
+# 公開は API Gateway(HTTP API) の Lambda プロキシ統合で行う。
+# Function URL + OAC は署名段階で到達せず断念（枯れた HTTP API を採用）。
+# CloudFront の /api/* オリジンとしてこの API を使う。
+resource "aws_apigatewayv2_api" "read_api" {
+  name          = "${local.name}-read-api"
+  protocol_type = "HTTP"
+}
+
+resource "aws_apigatewayv2_integration" "read_api" {
+  api_id                 = aws_apigatewayv2_api.read_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.read_api.invoke_arn
+  payload_format_version = "2.0"
+}
+
+# 全パス・全メソッドを Lambda へ。ルーティングは Lambda が query で判断する
+resource "aws_apigatewayv2_route" "read_api" {
+  api_id    = aws_apigatewayv2_api.read_api.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.read_api.id}"
+}
+
+resource "aws_apigatewayv2_stage" "read_api" {
+  api_id      = aws_apigatewayv2_api.read_api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "read_api_apigw" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.read_api.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.read_api.execution_arn}/*/*"
+}
+
+output "read_api_endpoint" {
+  value = aws_apigatewayv2_api.read_api.api_endpoint
+}

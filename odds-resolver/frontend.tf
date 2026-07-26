@@ -27,6 +27,7 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
   default_root_object = "index.html"
@@ -42,6 +43,19 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
+  # 当日 API。API Gateway(HTTP API) をカスタムオリジンにする。
+  origin {
+    domain_name = replace(aws_apigatewayv2_api.read_api.api_endpoint, "https://", "")
+    origin_id   = "apigw-read-api"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
   default_cache_behavior {
     target_origin_id       = "s3-frontend"
     viewer_protocol_policy = "redirect-to-https"
@@ -52,21 +66,32 @@ resource "aws_cloudfront_distribution" "frontend" {
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
 
+  # /api/* は当日 API（Lambda）へ。クエリ文字列(?date/?id)をオリジンへ渡し、
+  # 短時間だけキャッシュする（当日オッズは動くため）。
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
+    target_origin_id       = "apigw-read-api"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+
+    # AWS 管理 CachingOptimizedForUncompressedObjects ではなく、クエリを
+    # キャッシュキーに含める必要があるため専用ポリシーを別リソースで定義
+    cache_policy_id          = aws_cloudfront_cache_policy.api.id
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AWS 管理 AllViewerExceptHostHeader
+  }
+
   # オッズデータ（/data/*）はキャッシュ時間を短くする。
   # 開催中はオッズが動くため、長時間キャッシュすると古い値を配り続ける。
   # 過去レースは静的化して immutable にする想定だが、その制御は
   # オブジェクト側の Cache-Control ヘッダで行う（CachingOptimized は
   # オリジンのヘッダを尊重する）ので、behavior の分岐は増やさない。
 
-  # SPA。存在しないパスはルーティングを index.html に委ねる。
-  # S3 が返す 403/404 を index.html + 200 に読み替える。
+  # 存在しないパスは index.html にフォールバックする。S3(OAC) は存在しない
+  # オブジェクトに 403 を返すため 403 のみ読み替える。404 は読み替えない:
+  # /api/* の 404（存在しない日付・レース）を JSON のまま通すため。
   custom_error_response {
     error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-  custom_error_response {
-    error_code         = 404
     response_code      = 200
     response_page_path = "/index.html"
   }
@@ -105,4 +130,25 @@ data "aws_iam_policy_document" "frontend_bucket" {
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id
   policy = data.aws_iam_policy_document.frontend_bucket.json
+}
+
+# 当日 API 用キャッシュポリシー。クエリ文字列(?date/?id)をキャッシュキーに
+# 含め、60 秒だけ持つ（当日オッズは動くため長く持たせない）。
+resource "aws_cloudfront_cache_policy" "api" {
+  name        = "${local.name}-api"
+  default_ttl = 60
+  min_ttl     = 0
+  max_ttl     = 60
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "all"
+    }
+  }
 }
