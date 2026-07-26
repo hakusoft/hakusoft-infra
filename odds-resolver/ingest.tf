@@ -331,23 +331,42 @@ resource "aws_lambda_function" "read_api" {
   }
 }
 
-# Function URL は CloudFront 経由でのみ叩く。直叩きを塞ぐため AWS_IAM とし、
-# CloudFront の OAC（SigV4 署名）で呼ばせる。URL 単体の public 公開はしない。
-resource "aws_lambda_function_url" "read_api" {
-  function_name      = aws_lambda_function.read_api.function_name
-  authorization_type = "AWS_IAM"
+# 公開は API Gateway(HTTP API) の Lambda プロキシ統合で行う。
+# Function URL + OAC は署名段階で到達せず断念（枯れた HTTP API を採用）。
+# CloudFront の /api/* オリジンとしてこの API を使う。
+resource "aws_apigatewayv2_api" "read_api" {
+  name          = "${local.name}-read-api"
+  protocol_type = "HTTP"
 }
 
-# CloudFront(OAC) が read-api Function URL を呼ぶことを許可する
-resource "aws_lambda_permission" "read_api_cf" {
-  statement_id           = "AllowCloudFront"
-  action                 = "lambda:InvokeFunctionUrl"
-  function_name          = aws_lambda_function.read_api.function_name
-  principal              = "cloudfront.amazonaws.com"
-  source_arn             = aws_cloudfront_distribution.frontend.arn
-  function_url_auth_type = "AWS_IAM"
+resource "aws_apigatewayv2_integration" "read_api" {
+  api_id                 = aws_apigatewayv2_api.read_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.read_api.invoke_arn
+  payload_format_version = "2.0"
 }
 
-output "read_api_url" {
-  value = aws_lambda_function_url.read_api.function_url
+# 全パス・全メソッドを Lambda へ。ルーティングは Lambda が query で判断する
+resource "aws_apigatewayv2_route" "read_api" {
+  api_id    = aws_apigatewayv2_api.read_api.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.read_api.id}"
+}
+
+resource "aws_apigatewayv2_stage" "read_api" {
+  api_id      = aws_apigatewayv2_api.read_api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "read_api_apigw" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.read_api.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.read_api.execution_arn}/*/*"
+}
+
+output "read_api_endpoint" {
+  value = aws_apigatewayv2_api.read_api.api_endpoint
 }

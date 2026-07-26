@@ -27,14 +27,6 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
-# 当日読み取り API（Lambda Function URL）を CloudFront から SigV4 署名で呼ぶ。
-# これで Function URL を直叩き public にせず、同一ドメインの /api/* で読める。
-resource "aws_cloudfront_origin_access_control" "read_api" {
-  name                              = "${local.name}-read-api"
-  origin_access_control_origin_type = "lambda"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
-}
 
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
@@ -51,11 +43,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
-  # 当日 API。Function URL のホスト名だけを domain_name に渡す（https:// と / を除く）
+  # 当日 API。API Gateway(HTTP API) をカスタムオリジンにする。
   origin {
-    domain_name              = replace(replace(aws_lambda_function_url.read_api.function_url, "https://", ""), "/", "")
-    origin_id                = "lambda-read-api"
-    origin_access_control_id = aws_cloudfront_origin_access_control.read_api.id
+    domain_name = replace(aws_apigatewayv2_api.read_api.api_endpoint, "https://", "")
+    origin_id   = "apigw-read-api"
 
     custom_origin_config {
       http_port              = 80
@@ -79,7 +70,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   # 短時間だけキャッシュする（当日オッズは動くため）。
   ordered_cache_behavior {
     path_pattern           = "/api/*"
-    target_origin_id       = "lambda-read-api"
+    target_origin_id       = "apigw-read-api"
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
@@ -96,15 +87,11 @@ resource "aws_cloudfront_distribution" "frontend" {
   # オブジェクト側の Cache-Control ヘッダで行う（CachingOptimized は
   # オリジンのヘッダを尊重する）ので、behavior の分岐は増やさない。
 
-  # SPA。存在しないパスはルーティングを index.html に委ねる。
-  # S3 が返す 403/404 を index.html + 200 に読み替える。
+  # 存在しないパスは index.html にフォールバックする。S3(OAC) は存在しない
+  # オブジェクトに 403 を返すため 403 のみ読み替える。404 は読み替えない:
+  # /api/* の 404（存在しない日付・レース）を JSON のまま通すため。
   custom_error_response {
     error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-  custom_error_response {
-    error_code         = 404
     response_code      = 200
     response_page_path = "/index.html"
   }
