@@ -120,10 +120,24 @@ resource "aws_iam_role_policy" "archive_lambda" {
         Resource = "${aws_s3_bucket.data.arn}/*"
       },
       {
+        # days.json の read-modify-write に読み取りが要る（正本は data 側）
+        Sid      = "DataReadDays"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.data.arn}/days.json"
+      },
+      {
         Sid      = "DataList"
         Effect   = "Allow"
         Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.data.arn
+      },
+      {
+        # 配信用コピー。frontend バケットは data/ 配下だけ書ける
+        Sid      = "FrontendDataWrite"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.frontend.arn}/data/*"
       },
       {
         Sid      = "Logs"
@@ -186,7 +200,7 @@ resource "aws_lambda_function" "archive" {
   function_name = "${local.name}-archive"
   role          = aws_iam_role.archive_lambda.arn
   runtime       = "python3.13"
-  handler       = "main.handler"
+  handler       = "ingest.archive.handler"
   timeout       = 300
   memory_size   = 256
 
@@ -195,8 +209,9 @@ resource "aws_lambda_function" "archive" {
 
   environment {
     variables = {
-      TABLE_NAME  = aws_dynamodb_table.hot.name
-      DATA_BUCKET = aws_s3_bucket.data.id
+      TABLE_NAME      = aws_dynamodb_table.hot.name
+      DATA_BUCKET     = aws_s3_bucket.data.id
+      FRONTEND_BUCKET = aws_s3_bucket.frontend.id
     }
   }
 
@@ -205,7 +220,7 @@ resource "aws_lambda_function" "archive" {
   }
 }
 
-# ---- EventBridge（実装が載ったルールから有効化する。archive は #22 待ち） ----
+# ---- EventBridge（全ルール有効。1日のリズム: 23:30 焼く → 0:15 器 → 毎分） ----
 
 resource "aws_cloudwatch_event_rule" "fetch_minutely" {
   name                = "${local.name}-fetch-minutely"
@@ -253,7 +268,7 @@ resource "aws_lambda_permission" "morning_daily" {
 resource "aws_cloudwatch_event_rule" "archive_nightly" {
   name                = "${local.name}-archive-nightly"
   schedule_expression = "cron(30 14 * * ? *)"
-  state               = "DISABLED"
+  state               = "ENABLED"
 }
 
 resource "aws_cloudwatch_event_target" "archive_nightly" {
