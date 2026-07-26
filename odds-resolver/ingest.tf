@@ -141,7 +141,7 @@ resource "aws_lambda_function" "fetch" {
   function_name = "${local.name}-fetch"
   role          = aws_iam_role.ingest_lambda.arn
   runtime       = "python3.13"
-  handler       = "main.handler"
+  handler       = "ingest.fetch.handler"
   timeout       = 55
   memory_size   = 128
 
@@ -164,7 +164,7 @@ resource "aws_lambda_function" "morning" {
   function_name = "${local.name}-morning"
   role          = aws_iam_role.ingest_lambda.arn
   runtime       = "python3.13"
-  handler       = "main.handler"
+  handler       = "ingest.morning.handler"
   timeout       = 300
   memory_size   = 128
 
@@ -205,12 +205,12 @@ resource "aws_lambda_function" "archive" {
   }
 }
 
-# ---- EventBridge（全ルール無効で作成。実装が載る PR で有効化する） ------
+# ---- EventBridge（実装が載ったルールから有効化する。archive は #22 待ち） ----
 
 resource "aws_cloudwatch_event_rule" "fetch_minutely" {
   name                = "${local.name}-fetch-minutely"
   schedule_expression = "rate(1 minute)"
-  state               = "DISABLED"
+  state               = "ENABLED"
 }
 
 resource "aws_cloudwatch_event_target" "fetch_minutely" {
@@ -231,7 +231,7 @@ resource "aws_lambda_permission" "fetch_minutely" {
 resource "aws_cloudwatch_event_rule" "morning_daily" {
   name                = "${local.name}-morning-daily"
   schedule_expression = "cron(15 15 * * ? *)"
-  state               = "DISABLED"
+  state               = "ENABLED"
 }
 
 resource "aws_cloudwatch_event_target" "morning_daily" {
