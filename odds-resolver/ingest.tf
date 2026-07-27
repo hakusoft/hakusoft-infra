@@ -140,6 +140,13 @@ resource "aws_iam_role_policy" "archive_lambda" {
         Resource = "${aws_s3_bucket.frontend.arn}/data/*"
       },
       {
+        # 過去日の再焼き後に旧キャッシュを消す（odds-resolver#64）
+        Sid      = "CacheInvalidation"
+        Effect   = "Allow"
+        Action   = ["cloudfront:CreateInvalidation"]
+        Resource = aws_cloudfront_distribution.frontend.arn
+      },
+      {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -212,6 +219,7 @@ resource "aws_lambda_function" "archive" {
       TABLE_NAME      = aws_dynamodb_table.hot.name
       DATA_BUCKET     = aws_s3_bucket.data.id
       FRONTEND_BUCKET = aws_s3_bucket.frontend.id
+      DISTRIBUTION_ID = aws_cloudfront_distribution.frontend.id
     }
   }
 
