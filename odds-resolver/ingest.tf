@@ -385,3 +385,25 @@ resource "aws_lambda_permission" "read_api_apigw" {
 output "read_api_endpoint" {
   value = aws_apigatewayv2_api.read_api.api_endpoint
 }
+
+# 朝の窓で回収した前日の着順を view へ反映する再焼き（odds-resolver#52）。
+# 結果回収は 0:16 から始まり 1:45 ごろまでに終わるため、余裕を見て 2:30 JST
+resource "aws_cloudwatch_event_rule" "archive_rebake" {
+  name                = "${local.name}-archive-rebake"
+  schedule_expression = "cron(30 17 * * ? *)"
+  state               = "ENABLED"
+}
+
+resource "aws_cloudwatch_event_target" "archive_rebake" {
+  rule  = aws_cloudwatch_event_rule.archive_rebake.name
+  arn   = aws_lambda_function.archive.arn
+  input = jsonencode({ mode = "yesterday" })
+}
+
+resource "aws_lambda_permission" "archive_rebake" {
+  statement_id  = "AllowEventBridgeRebake"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.archive.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.archive_rebake.arn
+}
