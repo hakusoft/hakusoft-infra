@@ -3,6 +3,35 @@
 [odds-resolver](https://github.com/hakusoft/odds-resolver)（競馬オッズ可視化サイト）の
 AWS リソース定義。アプリの全体像はアプリ側 README を、ここではリソースと運用の事実を書く。
 
+## 構成図
+
+閲覧者は CloudFront 一枚だけを見る。静的ファイルは S3、`/api/*` だけが Lambda へ抜ける。
+データは「当日＝DynamoDB」「過去＝S3」に分かれ、夜間の archive がその境界を移動させる。
+
+```mermaid
+flowchart TB
+    Src["取得元サイト"]
+    EB["EventBridge<br/>3 ルール"]
+
+    EB --> Morning["morning<br/>当日のレース表を作る"]
+    EB --> Fetch["fetch<br/>毎分・オッズ取得"]
+    EB --> Archive["archive<br/>S3 へ焼く"]
+    Src -.-> Morning
+    Src -.-> Fetch
+
+    Morning --> DDB[("DynamoDB<br/>odds-resolver-hot<br/>当日ホット・TTL 2日")]
+    Fetch --> DDB
+    DDB --> Archive
+    Archive --> S3D[("S3 archive 正本<br/>バージョニング")]
+    Archive -->|view を配信面へ| S3F["S3 frontend<br/>静的 + data/"]
+
+    User["閲覧者"] --> CF["CloudFront"]
+    CF -->|既定| S3F
+    CF -->|/api/*| APIGW["API Gateway"]
+    APIGW --> ReadAPI["read-api"]
+    ReadAPI --> DDB
+```
+
 ## リソース構成
 
 | ファイル | 内容 |
@@ -57,6 +86,13 @@ Terraform は器（関数・ロール・環境変数・handler）だけを管理
 `ignore_changes = [filename, source_code_hash]` で見ない。実コードは
 odds-resolver リポジトリの deploy-ingest CI（main マージ時）が
 `update-function-code` で 4 関数へ配る。
+
+```mermaid
+flowchart LR
+    TF["Terraform<br/>（このリポジトリ）"] -->|器を作る<br/>関数・ロール・env・handler| Fn["Lambda 関数"]
+    CI["deploy-ingest CI<br/>（odds-resolver / main）"] -->|UpdateFunctionCode| Fn
+    TF -.->|filename と source_code_hash は<br/>ignore_changes で見ない| Fn
+```
 
 - 新設時はプレースホルダ zip で作られ、CI の初回デプロイで実コードに置き換わる
 - **handler の切替は Terraform 側の変更**（実装が載る PR とセットで行う）
