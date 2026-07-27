@@ -11,6 +11,9 @@ permissions:
 jobs:
   apply:
     runs-on: ubuntu-latest
+    # 意図的に mcp-test のみ。odds-resolver は plan だけを CI に載せ、apply は手元に置く。
+    # 自動 apply には IAM CreateRole/PassRole を CI ロールへ渡す必要があり、
+    # 「CI が自分より強い権限を作れる」経路になるため（#15）。
     defaults:
       run:
         working-directory: mcp-test

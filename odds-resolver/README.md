@@ -113,8 +113,11 @@ CI 用 2 本を分けるのは、どちらかの workflow が侵害されたと�
 
 ## 運用
 
-- **このディレクトリは手元 `terraform apply`**。リポジトリ CI の plan / apply は
-  mcp-test ディレクトリのみを対象にしている（拡張は #15）
+- **`fmt` / `validate` / `plan` は CI が回す**（PR にディレクトリ名付きでコメントされる）。
+  plan は `ReadOnlyAccess` + state パスの書き込みだけで足り、実リソースは触れない
+- **`apply` はこのディレクトリだけ手元で実行する**。ここは IAM ロール 5 本を管理しており、
+  自動 apply には CI ロールへ `iam:CreateRole` / `iam:PassRole` を渡すことになる。
+  それは CI が自分より強い権限を作れる経路になるため、apply は人間の手に残している（#15）
 - マージ前の main 以外からの apply は、適用済みの変更を巻き戻しうるので避ける
   （PR を先にマージ → clean な main から apply）。`-target` は依存リソースを
   巻き込むため原則使わない
