@@ -31,13 +31,16 @@ AWS リソース定義。アプリの全体像はアプリ側 README を、こ�
 23:30 ──→ archive   当日の確定分を S3 へ焼く（昨日までの世界を確定させる）
 00:00     （日付切替。フロントは新しい日付を「当日」として API に問い始める）
 00:15 ──→ morning   当日のレース表を取得し DynamoDB に器を作る
-00:16〜   fetch     毎分起動。締切駆動の段階制で最も切迫した 1 レースだけ取得
+00:16〜   fetch     毎分起動。朝の窓では前日の着順を回収し、発売開始
+                    （10:00）以降はスロット駆動で最も切迫した 1 レースを取得
+02:30 ──→ archive   回収した前日の着順を view へ再焼き（mode=yesterday）
 ```
 
 | JST | ルール | cron/rate | 関数 |
 | --- | --- | --- | --- |
 | 23:30 | archive-nightly | `cron(30 14 * * ? *)` | archive |
 | 0:15 | morning-daily | `cron(15 15 * * ? *)` | morning |
+| 2:30 | archive-rebake | `cron(30 17 * * ? *)`・input `{"mode":"yesterday"}` | archive |
 | 毎分 | fetch-minutely | `rate(1 minute)` | fetch |
 | リクエスト駆動 | ―（CloudFront `/api/*` → API Gateway） | ― | read-api |
 
