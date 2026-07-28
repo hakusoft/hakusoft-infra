@@ -120,11 +120,15 @@ resource "aws_iam_role_policy" "archive_lambda" {
         Resource = "${aws_s3_bucket.data.arn}/*"
       },
       {
-        # days.json の read-modify-write に読み取りが要る（正本は data 側）
-        Sid      = "DataReadDays"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.data.arn}/days.json"
+        # read-modify-write する累積ファイルの読み取り（正本は data 側）。
+        # days.json（開催目次）と calibration.json（較正曲線 #53）
+        Sid    = "DataReadCumulative"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "${aws_s3_bucket.data.arn}/days.json",
+          "${aws_s3_bucket.data.arn}/calibration.json",
+        ]
       },
       {
         Sid      = "DataList"
