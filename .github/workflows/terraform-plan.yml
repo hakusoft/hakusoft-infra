@@ -11,9 +11,13 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # 片方の失敗でもう片方の plan 結果を隠さない
+      matrix:
+        directory: [mcp-test, odds-resolver]
     defaults:
       run:
-        working-directory: mcp-test
+        working-directory: ${{ matrix.directory }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,20 +40,46 @@ jobs:
 
       - name: Post plan result to PR
         uses: actions/github-script@v7
+        env:
+          DIRECTORY: ${{ matrix.directory }}
+          OUTCOME: ${{ steps.plan.outcome }}
         with:
           script: |
             const fs = require('fs');
-            const output = fs.readFileSync('mcp-test/plan_output.txt', 'utf8');
+            const dir = process.env.DIRECTORY;
+            const output = fs.readFileSync(`${dir}/plan_output.txt`, 'utf8');
             const truncated = output.length > 60000
               ? output.slice(0, 60000) + '\n\n... (truncated)'
               : output;
-            const body = `#### Terraform Plan\n\`\`\`\n${truncated}\n\`\`\``;
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body,
-            });
+            // ディレクトリごとに 1 コメントを維持するための目印。
+            // 同じ PR に push し直しても増殖させず、既存を更新する。
+            const marker = `<!-- terraform-plan:${dir} -->`;
+            const status = process.env.OUTCOME === 'failure' ? '失敗' : '成功';
+            const body = [
+              marker,
+              `#### Terraform Plan — \`${dir}\`（${status}）`,
+              '```',
+              truncated,
+              '```',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number },
+            );
+            const existing = comments.find((c) => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }
 
       - name: Fail if plan failed
         if: steps.plan.outcome == 'failure'

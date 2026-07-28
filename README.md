@@ -15,14 +15,17 @@ hakusoft の各プロジェクト向け AWS リソースを Terraform で管理�
 
 ## CI/CD
 
-`.github/workflows/` に 3 本。**現時点の対象は `mcp-test/` ディレクトリのみ**で、
-`odds-resolver/` は手元 `terraform apply` で運用している（CI 対象化は #15）。
+`.github/workflows/` に 3 本。**対象ディレクトリはワークフローごとに異なる。**
 
-| ワークフロー | 契機 | 内容 |
-| --- | --- | --- |
-| `terraform-check.yml` | PR | `fmt` / `validate` |
-| `terraform-plan.yml` | PR | `plan` を実行し結果を PR にコメント |
-| `terraform-apply.yml` | `main` への push | `apply` |
+| ワークフロー | 契機 | 対象 | 内容 |
+| --- | --- | --- | --- |
+| `terraform-check.yml` | PR / `main` push | 両方 | `fmt` / `validate` |
+| `terraform-plan.yml` | PR | 両方 | `plan` を実行しディレクトリごとに PR へコメント |
+| `terraform-apply.yml` | `main` への push | `mcp-test` のみ | `apply` |
+
+`odds-resolver` の **apply だけは手元で実行する**。自動 apply には CI ロールへ
+IAM の `CreateRole` / `PassRole` を渡す必要があり、「CI が自分より強い権限を作れる」
+経路になるため、そこは人間の手に残している（#15）。plan は読み取りのみなので CI に載せてよい。
 
 権限は plan / apply で別々の IAM Role に分離し、認証は OIDC による一時認証情報を使う。
 設計の理由と仕組みは [mcp-test/README.md](mcp-test/README.md) に書いている。

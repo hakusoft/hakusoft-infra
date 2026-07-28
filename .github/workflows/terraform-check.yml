@@ -8,9 +8,13 @@ on:
 jobs:
   fmt-validate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # 片方の失敗でもう片方の結果を隠さない
+      matrix:
+        directory: [mcp-test, odds-resolver]
     defaults:
       run:
-        working-directory: mcp-test
+        working-directory: ${{ matrix.directory }}
     steps:
       - uses: actions/checkout@v4
 
