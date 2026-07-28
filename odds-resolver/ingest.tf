@@ -77,6 +77,13 @@ resource "aws_iam_role_policy" "ingest_lambda" {
         Resource = aws_dynamodb_table.hot.arn
       },
       {
+        # オッズ急変の通知先（odds-resolver#71）。fetch だけが使う
+        Sid      = "SurgePublish"
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = aws_sns_topic.surge.arn
+      },
+      {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -84,6 +91,20 @@ resource "aws_iam_role_policy" "ingest_lambda" {
       }
     ]
   })
+}
+
+# オッズ急変アラート（odds-resolver#71）。SMS は無料枠がないため Email のみ。
+resource "aws_sns_topic" "surge" {
+  name = "${local.name}-surge"
+}
+
+# 購読者は確認メールのリンクを自分で承認する（IaC からは pending_confirmation
+# のまま作られ、本人がクリックして初めて有効になる）
+resource "aws_sns_topic_subscription" "surge_email" {
+  count     = var.surge_alert_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.surge.arn
+  protocol  = "email"
+  endpoint  = var.surge_alert_email
 }
 
 # 夜間バッチ（DynamoDB を読み、S3 data バケットへ焼く。削除権限は持たない）
@@ -176,6 +197,8 @@ resource "aws_lambda_function" "fetch" {
   environment {
     variables = {
       TABLE_NAME = aws_dynamodb_table.hot.name
+      # 急変通知は fetch だけが送る（morning には渡さない・#71）
+      SURGE_TOPIC_ARN = aws_sns_topic.surge.arn
     }
   }
 

@@ -14,3 +14,13 @@ variable "github_sub_claim_prefix" {
   type        = string
   default     = "repo:hakusoft@261719523/odds-resolver@1308241586"
 }
+
+variable "surge_alert_email" {
+  description = <<-EOT
+    オッズ急変アラートの通知先メール（odds-resolver#71）。
+    空なら購読を作らない。設定後、本人が確認メールのリンクを承認して
+    初めて有効になる。SMS は無料枠がないため使わない。
+  EOT
+  type        = string
+  default     = ""
+}
