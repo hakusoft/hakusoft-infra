@@ -101,7 +101,9 @@ resource "aws_sns_topic" "surge" {
 # 購読者は確認メールのリンクを自分で承認する（IaC からは pending_confirmation
 # のまま作られ、本人がクリックして初めて有効になる）
 resource "aws_sns_topic_subscription" "surge_email" {
-  count     = var.surge_alert_email == "" ? 0 : 1
+  # "none" は「意図的に購読を作らない」の明示。渡し忘れは変数が未設定で
+  # 止まるので、ここに空文字が来ることはない（variables.tf の validation）
+  count     = var.surge_alert_email == "none" ? 0 : 1
   topic_arn = aws_sns_topic.surge.arn
   protocol  = "email"
   endpoint  = var.surge_alert_email
@@ -142,13 +144,18 @@ resource "aws_iam_role_policy" "archive_lambda" {
       },
       {
         # read-modify-write する累積ファイルの読み取り（正本は data 側）。
-        # days.json（開催目次）と calibration.json（較正曲線 #53）
+        # days.json（開催目次）と calibration.json（較正曲線 #53）。
+        # races/* は S3 起点の較正再集計（odds-resolver#69 の recalc）が読む。
+        # DynamoDB の DAY 器は TTL 2 日で消えるため、集計ロジックを変えた時に
+        # 過去日を埋め直す唯一の復元源が焼き済みの view になる。読み取りのみで、
+        # recalc は races/* を書き換えない（更新するのは calibration.json だけ）
         Sid    = "DataReadCumulative"
         Effect = "Allow"
         Action = ["s3:GetObject"]
         Resource = [
           "${aws_s3_bucket.data.arn}/days.json",
           "${aws_s3_bucket.data.arn}/calibration.json",
+          "${aws_s3_bucket.data.arn}/races/*",
         ]
       },
       {

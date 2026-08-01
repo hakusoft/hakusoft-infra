@@ -1,0 +1,13 @@
+# このファイルを terraform.tfvars にコピーして実値を入れる。
+# terraform.tfvars は .gitignore 済み（*.tfvars）なのでコミットされない。
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   # 値を埋めてから plan / apply
+#
+# terraform は同ディレクトリの terraform.tfvars を自動で読むため、
+# -var の指定は不要になる。
+#
+# 急変アラートの通知先。購読を作りたくない場合だけ "none" と書く。
+# この変数にデフォルト値は無い（渡し忘れると既存の購読が destroy される
+# 計画になるため、未設定なら plan の時点で止まるようにしてある）。
+surge_alert_email = "you@example.com"
