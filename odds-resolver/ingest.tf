@@ -220,8 +220,23 @@ resource "aws_lambda_function" "morning" {
   role          = aws_iam_role.ingest_lambda.arn
   runtime       = "python3.13"
   handler       = "ingest.morning.handler"
-  timeout       = 300
-  memory_size   = 128
+
+  # 所要時間は会場数で決まる。取得元 robots.txt の Crawl-Delay 60 秒を
+  # 厳守するため（ingest/source.py の CRAWL_DELAY_SEC）、トップ 1 回 +
+  # 会場ごとに 1 回の fetch が 60 秒間隔で直列に並ぶ:
+  #
+  #   n 場開催 = n × 60 秒 + 通信時間
+  #   4 場 → 240 秒 / 6 場 → 360 秒 / 8 場 → 480 秒
+  #
+  # 300 秒では 4 場でタイムアウトした（2026-09-01・#29）。その日は器を
+  # 書き終えた直後に落ちたので実害が無かったが、会場が 1 つ増えるか
+  # 通信が数秒遅れれば最後の会場が丸ごと欠ける（会場単位で put_item
+  # するため、途中で落ちるとその日は一部会場だけの器になる）。
+  #
+  # 600 秒なら 8 場まで耐える。地方競馬の同時開催は最大 5〜6 場程度。
+  # **Crawl-Delay は絶対制約なので、短縮も並列化もしない。**
+  timeout     = 600
+  memory_size = 128 # 実測 101MB（4 場・2026-09-01）
 
   filename         = data.archive_file.placeholder.output_path
   source_code_hash = data.archive_file.placeholder.output_base64sha256
