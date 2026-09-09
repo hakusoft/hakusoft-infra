@@ -27,3 +27,8 @@ output "github_deploy_ingest_role_arn" {
   description = "ingest デプロイ CI の role-to-assume に設定する ARN"
   value       = aws_iam_role.github_deploy_ingest.arn
 }
+
+output "github_morning_check_role_arn" {
+  description = "Role assumed by the morning-check workflow (read-only)"
+  value       = aws_iam_role.github_morning_check.arn
+}
