@@ -27,10 +27,13 @@
 
 resource "aws_iam_user" "morning_check" {
   name = "${local.name}-morning-check"
-  # IAM の description は使えないため tags で意図を残す（日本語は避ける）
+  # IAM の description は使えないため tags で意図を残す。
+  # **タグの値は [\p{L}\p{Z}\p{N}_.:/=+\-@] のみ。`#` は使えない**
+  # （2026-09-09 の apply が "hakusoft-infra#31" で ValidationError になった）。
+  # 日本語は通るが、他のリソースに合わせて ASCII にしておく。
   tags = {
     Purpose = "Read-only observation for the morning check routine"
-    Issue   = "hakusoft-infra#31"
+    Issue   = "hakusoft-infra-31"
   }
 }
 
