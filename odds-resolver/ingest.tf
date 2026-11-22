@@ -300,9 +300,16 @@ resource "aws_lambda_permission" "fetch_minutely" {
 
 # 日付が変わったら当日の器を作る。0:00 ちょうどは取得元側の日次切替と
 # 重なりうるため 0:15 JST = 前日 15:15 UTC にずらす
+#
+# 0:15〜9:15 JST の毎時起動する（odds-resolver#175）。取得元が 10/22 の
+# 0:00〜9:40 に 503 を返し、1 回きりの朝ジョブが落ちてその日が丸ごと欠けた。
+# 朝ジョブは完了印（MORNING#{date}）があれば取得元に触れずに終わるので、
+# 平常時に取得元へ行くのは 0:15 の 1 回だけ。
+#
+#   UTC 15-23 時 = JST 0-8 時 / UTC 0 時 = JST 9 時
 resource "aws_cloudwatch_event_rule" "morning_daily" {
   name                = "${local.name}-morning-daily"
-  schedule_expression = "cron(15 15 * * ? *)"
+  schedule_expression = "cron(15 0,15-23 * * ? *)"
   state               = "ENABLED"
 }
 
