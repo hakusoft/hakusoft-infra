@@ -84,6 +84,14 @@ resource "aws_iam_role_policy" "ingest_lambda" {
         Resource = aws_sns_topic.surge.arn
       },
       {
+        # 取得した HTML 原本（odds-resolver#172）。html/ に限る。
+        # 上書きはしない（キーに時刻を含む）が、バージョニングが保険になる
+        Sid      = "RawHtmlWrite"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.data.arn}/html/*"
+      },
+      {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -206,6 +214,8 @@ resource "aws_lambda_function" "fetch" {
       TABLE_NAME = aws_dynamodb_table.hot.name
       # 急変通知は fetch だけが送る（morning には渡さない・#71）
       SURGE_TOPIC_ARN = aws_sns_topic.surge.arn
+      # 取得した HTML 原本の置き場（#172）。無ければ保存しない
+      RAW_BUCKET = aws_s3_bucket.data.id
     }
   }
 
@@ -244,6 +254,7 @@ resource "aws_lambda_function" "morning" {
   environment {
     variables = {
       TABLE_NAME = aws_dynamodb_table.hot.name
+      RAW_BUCKET = aws_s3_bucket.data.id # HTML 原本（#172）
     }
   }
 
